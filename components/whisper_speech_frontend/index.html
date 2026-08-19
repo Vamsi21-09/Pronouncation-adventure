@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Whisper Speech Recognition Bridge</title>
+    <style>
+        @import url('https://api.fontshare.com/v2/css?f[]=general-sans@600,700,800&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'General Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        body {
+            background: transparent;
+            color: #102A2A;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            width: 100%;
+            padding: 4px 0;
+        }
+
+        .recorder-container {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .mic-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            max-width: 480px;
+            height: 52px;
+            background: #035352;
+            color: #FFFDF5;
+            border: none;
+            border-radius: 14px;
+            font-size: 1.05rem;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 4px 14px rgba(3, 83, 82, 0.3);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            user-select: none;
+            outline: none;
+        }
+
+        .mic-btn:hover:not(:disabled) {
+            background: #023D3C;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(3, 83, 82, 0.4);
+        }
+
+        .mic-btn:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .mic-btn.listening {
+            background: #EF4444 !important;
+            color: #FFFDF5 !important;
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.6) !important;
+            animation: pulse-red 1.2s infinite ease-in-out;
+        }
+
+        .mic-btn.hearing {
+            background: #10B981 !important;
+            color: #FFFDF5 !important;
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.6) !important;
+            animation: pulse-green 1.2s infinite ease-in-out;
+        }
+
+        .mic-btn.processing {
+            background: #D97706 !important;
+            color: #FFFDF5 !important;
+            box-shadow: 0 0 16px rgba(217, 119, 6, 0.5) !important;
+            animation: pulse-amber 1.2s infinite ease-in-out;
+            cursor: wait;
+        }
+
+        @keyframes pulse-red {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+        }
+
+        @keyframes pulse-green {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+        }
+
+        @keyframes pulse-amber {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.01); }
+        }
+
+        .status-banner {
+            width: 100%;
+            max-width: 480px;
+            border-radius: 12px;
+            padding: 8px 14px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #FAF5DC;
+            border: 1.5px solid rgba(47, 58, 58, 0.2);
+            color: #102A2A;
+            min-height: 40px;
+            transition: all 0.3s ease;
+        }
+
+        .status-listening {
+            border-color: #EF4444;
+            background: rgba(239, 68, 68, 0.12);
+            color: #991B1B;
+        }
+
+        .status-hearing {
+            border-color: #10B981;
+            background: rgba(16, 185, 129, 0.15);
+            color: #065F46;
+        }
+
+        .status-processing {
+            border-color: #D97706;
+            background: rgba(217, 119, 6, 0.12);
+            color: #92400E;
+        }
+
+        .status-heard {
+            border-color: #10B981;
+            background: rgba(16, 185, 129, 0.12);
+            color: #065F46;
+        }
+
+        .status-error {
+            border-color: #EF4444;
+            background: rgba(239, 68, 68, 0.15);
+            color: #991B1B;
+            font-size: 0.86rem;
+            line-height: 1.35;
+        }
+
+        .heard-highlight {
+            font-size: 1.05rem;
+            font-weight: 800;
+            color: #035352;
+            letter-spacing: 0.02em;
+        }
+
+        .model-loading-pill {
+            font-size: 0.76rem;
+            color: #365656;
+            background: rgba(3, 83, 82, 0.08);
+            border-radius: 6px;
+            padding: 2px 8px;
+            font-weight: 600;
+            display: inline-block;
+        }
+
+        .diagnostic-panel {
+            width: 100%;
+            max-width: 480px;
+            background: #F8FAFC;
+            border: 1px solid #CBD5E1;
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 0.76rem;
+            font-family: monospace;
+            color: #334155;
+            line-height: 1.45;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <div class="recorder-container">
+        <button id="mic-action-btn" class="mic-btn" type="button">
+            <span id="btn-icon">🎙️</span>
+            <span id="btn-text">Speak Now</span>
+        </button>
+
+        <div id="status-card" class="status-banner">
+            <span id="status-text">🎙️ Ready • Click to speak</span>
+            <span id="status-extra" class="model-loading-pill" style="display:none;">AI Model Ready</span>
+        </div>
+
+        <!-- Temporary Candidate Debug Section -->
+        <div id="diag-panel" class="diagnostic-panel">
+            <div style="font-weight:700; color:#0F172A; border-bottom:1px solid #CBD5E1; padding-bottom:3px; margin-bottom:4px;">
+                🔍 Word Recognition & Candidate Diagnostics
+            </div>
+            <div>Target: <strong id="diag-target" style="color:#035352;">BAT</strong> (<span id="diag-mode">SINGLE_WORD</span>)</div>
+            <div>Raw Whisper: <span id="diag-raw-whisper" style="color:#475569;">—</span></div>
+            <div>Normalized: <span id="diag-normalized" style="color:#475569;">—</span></div>
+            <div>Candidate: <strong id="diag-candidate" style="color:#035352;">—</strong></div>
+            <div>Lexical similarity: <span id="diag-lexical-sim">0.00</span></div>
+            <div>Phonetic similarity: <span id="diag-phonetic-sim">0.00</span></div>
+            <div>Final recognized word: <strong id="diag-final-word" style="color:#047857;">none</strong></div>
+            <div>Confidence: <strong id="diag-confidence" style="color:#2563EB;">0.00</strong></div>
+            <div style="margin-top:2px; font-size:0.72rem; color:#64748B;">Mic: <span id="diag-state">IDLE</span> | Audio: <span id="diag-duration">0.0s</span> | Event: <span id="diag-last-event">INITIALIZED</span></div>
+            <div id="diag-error-box" style="color:#DC2626; display:none; margin-top:3px; font-weight:700;">Notice: <span id="diag-error-text"></span></div>
+        </div>
+    </div>
+
+    <!-- Transformers.js ESM Module -->
+    <script type="module">
+        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+
+        // Configure Transformers.js for browser client
+        env.allowLocalModels = false;
+        env.useBrowserCache = true;
+
+        // ---------------------------------------------------------
+        // Streamlit Protocol Bridge
+        // ---------------------------------------------------------
+        function sendToStreamlit(type, data) {
+            window.parent.postMessage({
+                isStreamlitMessage: true,
+                type: type,
+                ...data
+            }, "*");
+        }
+
+        function setComponentValue(value) {
+            sendToStreamlit("streamlit:setComponentValue", { value: value });
+        }
+
+        function setFrameHeight() {
+            const height = document.body.scrollHeight || document.documentElement.offsetHeight || 330;
+            sendToStreamlit("streamlit:setFrameHeight", { height: height + 10 });
+        }
+
+        sendToStreamlit("streamlit:componentReady", { apiVersion: 1 });
+
+        // ---------------------------------------------------------
+        // Diagnostic UI Helpers
+        // ---------------------------------------------------------
+        const diagTarget = document.getElementById('diag-target');
+        const diagMode = document.getElementById('diag-mode');
+        const diagRawWhisper = document.getElementById('diag-raw-whisper');
+        const diagNormalized = document.getElementById('diag-normalized');
+        const diagCandidate = document.getElementById('diag-candidate');
+        const diagLexicalSim = document.getElementById('diag-lexical-sim');
+        const diagPhoneticSim = document.getElementById('diag-phonetic-sim');
+        const diagFinalWord = document.getElementById('diag-final-word');
+        const diagConfidence = document.getElementById('diag-confidence');
+        const diagState = document.getElementById('diag-state');
+        const diagDuration = document.getElementById('diag-duration');
+        const diagLastEvent = document.getElementById('diag-last-event');
+        const diagErrorBox = document.getElementById('diag-error-box');
+        const diagErrorText = document.getElementById('diag-error-text');
+
+        function updateDiagEvent(eventName) {
+            console.log(`[EVENT_TRACE] ${eventName}`);
+            if (diagLastEvent) diagLastEvent.innerText = eventName;
+        }
+
+        function setDiagError(errMsg) {
+            console.error(`[EVENT_TRACE] ATTEMPT_FAILED: ${errMsg}`);
+            if (diagLastEvent) diagLastEvent.innerText = 'ATTEMPT_FAILED';
+            if (diagErrorBox) diagErrorBox.style.display = 'block';
+            if (diagErrorText) diagErrorText.innerText = errMsg;
+        }
+
+        // ---------------------------------------------------------
+        // Phonetic Skeleton & Levenshtein Similarity (0.0 to 1.0)
+        // ---------------------------------------------------------
+        function getPhoneticSkeleton(word) {
+            if (!word) return "";
+            const w = word.toLowerCase().replace(/[^a-z]/g, "");
+            if (!w) return "";
+
+            let skeleton = "";
+            for (let i = 0; i < w.length; i++) {
+                const ch = w[i];
+                if ("aeiouy".includes(ch)) {
+                    skeleton += ch;
+                } else if ("bpfv".includes(ch)) {
+                    skeleton += "1";
+                } else if ("cgjkqsxz".includes(ch)) {
+                    skeleton += "2";
+                } else if ("dt".includes(ch)) {
+                    skeleton += "3";
+                } else if (ch === "l") {
+                    skeleton += "4";
+                } else if ("mn".includes(ch)) {
+                    skeleton += "5";
+                } else if (ch === "r") {
+                    skeleton += "6";
+                } else {
+                    skeleton += ch;
+                }
+            }
+            return skeleton.replace(/([1-6])\1+/g, "$1");
+        }
+
+        function calculateLevenshtein(s1, s2) {
+            if (!s1 || !s2) return 0.0;
+            if (s1 === s2) return 1.0;
+            const len1 = s1.length, len2 = s2.length;
+            const d = [];
+            for (let i = 0; i <= len1; i++) d[i] = [i];
+            for (let j = 0; j <= len2; j++) d[0][j] = j;
+            for (let i = 1; i <= len1; i++) {
+                for (let j = 1; j <= len2; j++) {
+                    const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+                    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+                }
+            }
+            const maxLen = Math.max(len1, len2);
+            return maxLen > 0 ? (1.0 - (d[len1][len2] / maxLen)) : 0.0;
+        }
+
+        // ---------------------------------------------------------
+        // Target-Aware Single-Word Recognition & Candidate Extraction
+        // ---------------------------------------------------------
+        function processRecognitionOutput(rawTranscript, targetWord) {
+            const cleanTarget = (targetWord || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+            const targetWords = (targetWord || "").trim().split(/\s+/).filter(w => w.length > 0);
+            const isSingleWordMode = (targetWords.length <= 1);
+
+            const normalized = (rawTranscript || "")
+                .trim()
+                .toLowerCase()
+                .replace(/[.,/#!$%^&*;:{}=\-_`~()?"']/g, "")
+                .replace(/\s+/g, " ")
+                .trim();
+
+            if (!isSingleWordMode) {
+                // Sentence mode: preserve full sentence transcript
+                const lex = calculateLevenshtein(cleanTarget, normalized.replace(/\s+/g, ""));
+                return {
+                    candidate: normalized,
+                    normalized: normalized,
+                    lexicalSim: lex,
+                    phoneticSim: lex,
+                    confidence: 1.0,
+                    isHallucination: false
+                };
+            }
+
+            const tokens = normalized.split(/\s+/).filter(w => w.length > 0);
+            if (tokens.length === 0) {
+                return {
+                    candidate: "",
+                    normalized: "",
+                    lexicalSim: 0.0,
+                    phoneticSim: 0.0,
+                    confidence: 0.0,
+                    isHallucination: false
+                };
+            }
+
+            const targetSkel = getPhoneticSkeleton(cleanTarget);
+
+            // Case 1: Single token output (e.g. "bat", "bad", "back", "cat", "cap", "dog", "dot")
+            // NEVER replace candidate with targetWord: preserves actual uttered token
+            if (tokens.length === 1) {
+                const word = tokens[0];
+                const lexSim = calculateLevenshtein(cleanTarget, word);
+                const phonSim = calculateLevenshtein(targetSkel, getPhoneticSkeleton(word));
+                return {
+                    candidate: word,
+                    normalized: normalized,
+                    lexicalSim: lexSim,
+                    phoneticSim: phonSim,
+                    confidence: 0.95,
+                    isHallucination: false
+                };
+            }
+
+            // Case 2: Two tokens with leading article (e.g. "the bat", "a bad", "the dog")
+            if (tokens.length === 2 && ["a", "an", "the", "to"].includes(tokens[0])) {
+                const word = tokens[1];
+                const lexSim = calculateLevenshtein(cleanTarget, word);
+                const phonSim = calculateLevenshtein(targetSkel, getPhoneticSkeleton(word));
+                return {
+                    candidate: word,
+                    normalized: normalized,
+                    lexicalSim: lexSim,
+                    phoneticSim: phonSim,
+                    confidence: 0.90,
+                    isHallucination: false
+                };
+            }
+
+            // Case 3: 2-3 tokens where one token is a clear candidate
+            if (tokens.length <= 3) {
+                let bestWord = tokens[0];
+                let bestLex = 0;
+                let bestPhon = 0;
+                let bestCombined = -1;
+
+                for (const tok of tokens) {
+                    if (["a", "an", "the", "is", "it"].includes(tok)) continue;
+                    const lex = calculateLevenshtein(cleanTarget, tok);
+                    const phon = calculateLevenshtein(targetSkel, getPhoneticSkeleton(tok));
+                    const combined = (lex * 0.5) + (phon * 0.5);
+                    if (combined > bestCombined) {
+                        bestCombined = combined;
+                        bestWord = tok;
+                        bestLex = lex;
+                        bestPhon = phon;
+                    }
+                }
+
+                if (bestCombined >= 0.35) {
+                    return {
+                        candidate: bestWord,
+                        normalized: normalized,
+                        lexicalSim: bestLex,
+                        phoneticSim: bestPhon,
+                        confidence: 0.80,
+                        isHallucination: false
+                    };
+                }
+            }
+
+            // Case 4: Long multi-word sentence (e.g. "I am a bad boy and...")
+            // Reject unrelated hallucinated sentences for single-word exercise
+            let bestWord = "";
+            let bestLex = 0;
+            let bestPhon = 0;
+
+            for (const tok of tokens) {
+                const lex = calculateLevenshtein(cleanTarget, tok);
+                const phon = calculateLevenshtein(targetSkel, getPhoneticSkeleton(tok));
+                if (lex >= 0.80 || (cleanTarget.length <= 4 && lex >= 0.66 && phon >= 0.80)) {
+                    bestWord = tok;
+                    bestLex = lex;
+                    bestPhon = phon;
+                    break;
+                }
+            }
+
+            if (bestWord) {
+                return {
+                    candidate: bestWord,
+                    normalized: normalized,
+                    lexicalSim: bestLex,
+                    phoneticSim: bestPhon,
+                    confidence: 0.65,
+                    isHallucination: false
+                };
+            }
+
+            // Hallucinated sentence rejected
+            return {
+                candidate: "",
+                normalized: normalized,
+                lexicalSim: 0.0,
+                phoneticSim: 0.0,
+                confidence: 0.20,
+                isHallucination: true
+            };
+        }
+
+        // ---------------------------------------------------------
+        // Audio Resampling & Normalization Helpers (Strict 16kHz for Whisper)
+        // ---------------------------------------------------------
+        function resampleTo16kHz(audioBuffer, sourceSampleRate) {
+            if (!audioBuffer || audioBuffer.length === 0) return new Float32Array(0);
+            if (sourceSampleRate === 16000) return audioBuffer;
+
+            const ratio = sourceSampleRate / 16000;
+            const newLength = Math.round(audioBuffer.length / ratio);
+            const result = new Float32Array(newLength);
+
+            for (let i = 0; i < newLength; i++) {
+                const sourceIndex = i * ratio;
+                const indexFloor = Math.floor(sourceIndex);
+                const indexCeil = Math.min(indexFloor + 1, audioBuffer.length - 1);
+                const fraction = sourceIndex - indexFloor;
+                result[i] = audioBuffer[indexFloor] * (1 - fraction) + audioBuffer[indexCeil] * fraction;
+            }
+            return result;
+        }
+
+        function normalizeAudio(samples) {
+            let max = 0;
+            for (let i = 0; i < samples.length; i++) {
+                const abs = Math.abs(samples[i]);
+                if (abs > max) max = abs;
+            }
+            if (max > 0.003) {
+                const factor = 0.90 / max;
+                const normalized = new Float32Array(samples.length);
+                for (let i = 0; i < samples.length; i++) {
+                    normalized[i] = Math.max(-1.0, Math.min(1.0, samples[i] * factor));
+                }
+                return normalized;
+            }
+            return samples;
+        }
+
+        // ---------------------------------------------------------
+        // UI Elements & State Machine Variables
+        // ---------------------------------------------------------
+        const btn = document.getElementById('mic-action-btn');
+        const btnIcon = document.getElementById('btn-icon');
+        const btnText = document.getElementById('btn-text');
+        const statusCard = document.getElementById('status-card');
+        const statusText = document.getElementById('status-text');
+        const statusExtra = document.getElementById('status-extra');
+
+        const STATE_IDLE = 'IDLE';
+        const STATE_LISTENING = 'LISTENING';     // 0-3s initial window waiting for speech
+        const STATE_RECORDING = 'RECORDING';     // Voice active, capturing Float32 PCM
+        const STATE_PROCESSING = 'PROCESSING';   // Speech ended naturally, running Whisper
+        const STATE_DELIVERED = 'DELIVERED';     // Result delivered, ready for Speak Again
+
+        let currentState = STATE_IDLE;
+        let currentAttemptId = null;
+        let defaultButtonLabel = "Speak Now";
+        let currentTargetWord = "bat";
+
+        // Audio Stream & Context
+        let audioContext = null;
+        let mediaStream = null;
+        let audioProcessorNode = null;
+        let audioChunks = [];
+
+        // VAD & Energy State Variables
+        let initialListeningTimer = null;
+        let vadWatchdogInterval = null;
+        let speechStartTime = 0;
+        let lastSpeechTime = 0;
+        let noiseFloorRMS = 0.008;
+        let peakSpeechRMS = 0.020;
+        let currentRMS = 0.0;
+
+        // Whisper Model Singleton
+        let whisperPipeline = null;
+        let isModelLoading = false;
+
+        const SILENCE_DURATION_MS = 1100;   // 1.1s silence post-speech to auto-end
+        const INITIAL_WINDOW_MS = 3200;     // 3.2s window to start speaking
+        const SAFETY_MAX_MS = 10000;        // 10s hard max duration
+
+        // Pre-warm Whisper Model in background
+        async function loadWhisperModel() {
+            if (whisperPipeline) return whisperPipeline;
+            if (isModelLoading) return null;
+
+            isModelLoading = true;
+            statusExtra.style.display = 'inline-block';
+            statusExtra.innerText = '⚡ Loading AI Model...';
+
+            try {
+                console.log('[WHISPER_LOG] Loading Xenova/whisper-tiny.en model...');
+                whisperPipeline = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
+                    quantized: true,
+                    progress_callback: (p) => {
+                        if (p.status === 'progress' && p.file) {
+                            const pct = Math.round((p.loaded / p.total) * 100);
+                            statusExtra.innerText = `⚡ Model: ${pct}%`;
+                        } else if (p.status === 'done') {
+                            statusExtra.innerText = '⚡ AI Ready';
+                        }
+                    }
+                });
+                console.log('[WHISPER_LOG] Whisper model loaded and cached successfully!');
+                statusExtra.innerText = '⚡ Whisper AI Ready';
+                setTimeout(() => { statusExtra.style.display = 'none'; }, 2000);
+            } catch (err) {
+                console.error('[WHISPER_LOG] Failed to load Whisper model:', err);
+                statusExtra.innerText = '⚠️ Model Error';
+                setDiagError("Whisper model loading failed: " + err.message);
+            } finally {
+                isModelLoading = false;
+            }
+            return whisperPipeline;
+        }
+
+        // Start background preloading immediately
+        loadWhisperModel();
+
+        // ---------------------------------------------------------
+        // Streamlit Render Listener
+        // ---------------------------------------------------------
+        window.addEventListener("message", function(event) {
+            if (!event.data || !event.data.isStreamlitMessage) return;
+
+            if (event.data.type === "streamlit:render") {
+                const args = event.data.args || {};
+                if (args.button_label && currentState === STATE_IDLE) {
+                    defaultButtonLabel = args.button_label;
+                    btnText.innerText = defaultButtonLabel;
+                }
+                if (args.target_word) {
+                    currentTargetWord = args.target_word.trim();
+                    if (diagTarget) diagTarget.innerText = currentTargetWord.toUpperCase();
+                    const words = currentTargetWord.split(/\s+/).filter(w => w.length > 0);
+                    if (diagMode) diagMode.innerText = words.length > 1 ? "SENTENCE" : "SINGLE_WORD";
+                }
+                setFrameHeight();
+            }
+        });
+
+        function clearAllTimers() {
+            if (initialListeningTimer) {
+                clearTimeout(initialListeningTimer);
+                initialListeningTimer = null;
+            }
+            if (vadWatchdogInterval) {
+                clearInterval(vadWatchdogInterval);
+                vadWatchdogInterval = null;
+            }
+        }
+
+        function stopAudioCapture() {
+            if (audioProcessorNode) {
+                try { audioProcessorNode.disconnect(); } catch(e) {}
+                audioProcessorNode = null;
+            }
+            if (mediaStream) {
+                try {
+                    mediaStream.getTracks().forEach(track => track.stop());
+                } catch(e) {}
+                mediaStream = null;
+            }
+            if (audioContext && audioContext.state !== 'closed') {
+                try { audioContext.close(); } catch(e) {}
+                audioContext = null;
+            }
+        }
+
+        function setUiIdle(message, isError) {
+            clearAllTimers();
+            stopAudioCapture();
+            currentState = STATE_IDLE;
+            if (diagState) diagState.innerText = 'IDLE';
+
+            btn.className = 'mic-btn';
+            btnIcon.innerText = '🎙️';
+            btnText.innerText = defaultButtonLabel;
+
+            if (isError) {
+                statusCard.className = 'status-banner status-error';
+            } else {
+                statusCard.className = 'status-banner';
+            }
+
+            statusText.innerHTML = message || '🎙️ Ready • Click to speak';
+            setFrameHeight();
+        }
+
+        function generateUniqueAttemptId() {
+            if (window.crypto && window.crypto.randomUUID) {
+                return window.crypto.randomUUID();
+            }
+            return 'att_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+        }
+
+        // ---------------------------------------------------------
+        // Hands-Free VAD Audio Capture & Whisper Pipeline
+        // ---------------------------------------------------------
+        async function startPronunciationAttempt() {
+            // Guard: Only allow start if in IDLE or DELIVERED
+            if (currentState === STATE_LISTENING || currentState === STATE_RECORDING || currentState === STATE_PROCESSING) {
+                console.log(`[WHISPER_LOG] Start attempt ignored during busy state: ${currentState}`);
+                return;
+            }
+
+            clearAllTimers();
+            stopAudioCapture();
+
+            const attemptId = generateUniqueAttemptId();
+            currentAttemptId = attemptId;
+            currentState = STATE_LISTENING;
+
+            audioChunks = [];
+            speechStartTime = 0;
+            lastSpeechTime = 0;
+            noiseFloorRMS = 0.008;
+            peakSpeechRMS = 0.020;
+            currentRMS = 0.0;
+
+            console.log(`[WHISPER_LOG] ATTEMPT ${attemptId}: started in STATE_LISTENING for target='${currentTargetWord}'`);
+
+            if (diagTarget) diagTarget.innerText = currentTargetWord.toUpperCase();
+            const words = currentTargetWord.split(/\s+/).filter(w => w.length > 0);
+            if (diagMode) diagMode.innerText = words.length > 1 ? "SENTENCE" : "SINGLE_WORD";
+            if (diagState) diagState.innerText = 'LISTENING';
+            if (diagDuration) diagDuration.innerText = '0.0s';
+            if (diagRawWhisper) diagRawWhisper.innerText = '—';
+            if (diagNormalized) diagNormalized.innerText = '—';
+            if (diagCandidate) diagCandidate.innerText = '—';
+            if (diagLexicalSim) diagLexicalSim.innerText = '0.00';
+            if (diagPhoneticSim) diagPhoneticSim.innerText = '0.00';
+            if (diagFinalWord) diagFinalWord.innerText = '—';
+            if (diagConfidence) diagConfidence.innerText = '0.00';
+            if (diagErrorBox) diagErrorBox.style.display = 'none';
+
+            updateDiagEvent('MIC_CLICKED');
+            updateDiagEvent('RECORDING_STARTED');
+
+            btn.className = 'mic-btn listening';
+            btnIcon.innerText = '🔴';
+            btnText.innerText = 'Listening — Speak now...';
+            statusCard.className = 'status-banner status-listening';
+            statusText.innerHTML = '🔴 Listening... (speak clearly)';
+            setFrameHeight();
+
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        channelCount: 1,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                });
+
+                if (attemptId !== currentAttemptId) {
+                    console.log(`[WHISPER_LOG] Attempt ${attemptId} cancelled during mic acquisition`);
+                    return;
+                }
+
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const source = audioContext.createMediaStreamSource(mediaStream);
+
+                audioProcessorNode = audioContext.createScriptProcessor(4096, 1, 1);
+                
+                audioProcessorNode.onaudioprocess = function(e) {
+                    if (attemptId !== currentAttemptId || (currentState !== STATE_LISTENING && currentState !== STATE_RECORDING)) {
+                        return;
+                    }
+
+                    const inputData = e.inputBuffer.getChannelData(0);
+                    audioChunks.push(new Float32Array(inputData));
+
+                    let sum = 0;
+                    for (let i = 0; i < inputData.length; i++) {
+                        sum += inputData[i] * inputData[i];
+                    }
+                    currentRMS = Math.sqrt(sum / inputData.length);
+
+                    const dynamicSpeechThreshold = Math.max(0.012, noiseFloorRMS * 2.2);
+                    const dynamicSilenceThreshold = Math.max(0.007, noiseFloorRMS * 1.3, peakSpeechRMS * 0.25);
+
+                    if (currentState === STATE_LISTENING) {
+                        noiseFloorRMS = (noiseFloorRMS * 0.85) + (currentRMS * 0.15);
+
+                        if (currentRMS > dynamicSpeechThreshold) {
+                            currentState = STATE_RECORDING;
+                            speechStartTime = Date.now();
+                            lastSpeechTime = Date.now();
+                            peakSpeechRMS = currentRMS;
+
+                            updateDiagEvent('SPEECH_DETECTED');
+                            if (diagState) diagState.innerText = 'RECORDING';
+
+                            if (initialListeningTimer) {
+                                clearTimeout(initialListeningTimer);
+                                initialListeningTimer = null;
+                            }
+
+                            btn.className = 'mic-btn hearing';
+                            btnIcon.innerText = '🎤';
+                            btnText.innerText = 'Hearing you...';
+                            statusCard.className = 'status-banner status-hearing';
+                            statusText.innerHTML = '🎤 Hearing you... keep speaking!';
+                        }
+                    } else if (currentState === STATE_RECORDING) {
+                        if (diagDuration) {
+                            diagDuration.innerText = ((Date.now() - speechStartTime) / 1000).toFixed(1) + 's';
+                        }
+
+                        if (currentRMS > peakSpeechRMS) {
+                            peakSpeechRMS = currentRMS;
+                        }
+
+                        if (currentRMS > dynamicSilenceThreshold) {
+                            lastSpeechTime = Date.now();
+                        }
+                    }
+                };
+
+                source.connect(audioProcessorNode);
+                audioProcessorNode.connect(audioContext.destination);
+
+                initialListeningTimer = setTimeout(() => {
+                    if (attemptId === currentAttemptId && currentState === STATE_LISTENING) {
+                        updateDiagEvent('ATTEMPT_FAILED (Initial window elapsed)');
+                        setUiIdle("⚠️ I didn't hear you. Please try again.", false);
+                        setComponentValue({
+                            attempt_id: attemptId,
+                            transcript: "",
+                            confidence: 0.0,
+                            error: "no-speech",
+                            timestamp: Date.now()
+                        });
+                    }
+                }, INITIAL_WINDOW_MS);
+
+                vadWatchdogInterval = setInterval(() => {
+                    if (attemptId !== currentAttemptId) {
+                        clearInterval(vadWatchdogInterval);
+                        return;
+                    }
+
+                    if (currentState === STATE_RECORDING) {
+                        const now = Date.now();
+                        const timeSinceSpeech = now - lastSpeechTime;
+                        const totalSpeechDuration = now - speechStartTime;
+
+                        if (timeSinceSpeech >= SILENCE_DURATION_MS && totalSpeechDuration >= 300) {
+                            updateDiagEvent('RECORDING_STOPPING (Silence detected)');
+                            finishRecordingAndTranscribe(attemptId);
+                            return;
+                        }
+
+                        if (totalSpeechDuration >= SAFETY_MAX_MS) {
+                            updateDiagEvent('RECORDING_STOPPING (Hard limit 10s)');
+                            finishRecordingAndTranscribe(attemptId, "Your recording was finalized, analysing now...");
+                            return;
+                        }
+                    }
+                }, 100);
+
+            } catch (err) {
+                console.error(`[WHISPER_LOG] ATTEMPT ${attemptId}: microphone access error:`, err);
+                let userMsg = '⚠️ Audio capture issue. Click to retry.';
+                let errType = 'error';
+
+                if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                    userMsg = '🔒 Mic blocked. Allow microphone access in your browser.';
+                    errType = 'permission-denied';
+                }
+
+                setDiagError(err.name + ": " + err.message);
+                setUiIdle(userMsg, true);
+                setComponentValue({
+                    attempt_id: attemptId,
+                    transcript: "",
+                    confidence: 0.0,
+                    error: errType,
+                    timestamp: Date.now()
+                });
+            }
+        }
+
+        // ---------------------------------------------------------
+        // Automatic Speech Completion & Whisper Inference
+        // ---------------------------------------------------------
+        async function finishRecordingAndTranscribe(attemptId, bannerNotice) {
+            if (attemptId !== currentAttemptId || currentState === STATE_PROCESSING) {
+                return;
+            }
+
+            currentState = STATE_PROCESSING;
+            clearAllTimers();
+
+            if (diagState) diagState.innerText = 'PROCESSING';
+            updateDiagEvent('RECORDING_FINALIZED');
+
+            const actualSampleRate = (audioContext && audioContext.sampleRate) ? audioContext.sampleRate : 48000;
+
+            btn.className = 'mic-btn processing';
+            btnIcon.innerText = '⏳';
+            btnText.innerText = 'Analysing pronunciation...';
+            statusCard.className = 'status-banner status-processing';
+            statusText.innerHTML = bannerNotice || '⏳ Analysing pronunciation with Whisper AI...';
+
+            const startTime = Date.now();
+
+            try {
+                let totalLength = 0;
+                for (let i = 0; i < audioChunks.length; i++) {
+                    totalLength += audioChunks[i].length;
+                }
+
+                const rawAudio = new Float32Array(totalLength);
+                let offset = 0;
+                for (let i = 0; i < audioChunks.length; i++) {
+                    rawAudio.set(audioChunks[i], offset);
+                    offset += audioChunks[i].length;
+                }
+
+                stopAudioCapture();
+
+                const audio16k = resampleTo16kHz(rawAudio, actualSampleRate);
+                const normalizedAudio16k = normalizeAudio(audio16k);
+                const durationSec = (normalizedAudio16k.length / 16000).toFixed(2);
+
+                if (diagDuration) diagDuration.innerText = durationSec + 's';
+
+                updateDiagEvent(`AUDIO_SAMPLE_COUNT = ${normalizedAudio16k.length}`);
+                updateDiagEvent(`AUDIO_DURATION = ${durationSec}s`);
+                updateDiagEvent('AUDIO_PAYLOAD_CREATED');
+
+                if (normalizedAudio16k.length < 1600) {
+                    setDiagError(`Audio buffer too small: ${normalizedAudio16k.length} samples`);
+                    setUiIdle("⚠️ I didn't hear you clearly. Please try again.", false);
+                    setComponentValue({
+                        attempt_id: attemptId,
+                        transcript: "",
+                        confidence: 0.0,
+                        error: "no-speech",
+                        timestamp: Date.now()
+                    });
+                    return;
+                }
+
+                const transcriber = await loadWhisperModel();
+                if (!transcriber) {
+                    throw new Error("Whisper model initialization failed");
+                }
+
+                if (attemptId !== currentAttemptId) {
+                    console.log(`[WHISPER_LOG] Stale Whisper task ignored for attempt ${attemptId}`);
+                    return;
+                }
+
+                updateDiagEvent('WHISPER_CALLED');
+
+                const targetTokens = currentTargetWord.split(/\s+/).filter(w => w.length > 0);
+                const isSingleWordMode = (targetTokens.length <= 1);
+
+                const result = await transcriber(normalizedAudio16k, {
+                    return_timestamps: false,
+                    max_new_tokens: isSingleWordMode ? 6 : 64
+                });
+
+                if (attemptId !== currentAttemptId) {
+                    console.log(`[WHISPER_LOG] Discarding Whisper result for completed/superseded attempt ${attemptId}`);
+                    return;
+                }
+
+                updateDiagEvent('WHISPER_RETURNED');
+
+                const rawTranscript = (result && result.text) ? result.text : "";
+                console.log(`[EVENT_TRACE] WHISPER_RAW_OUTPUT: "${rawTranscript}"`);
+
+                const { candidate, normalized, lexicalSim, phoneticSim, confidence, isHallucination } = processRecognitionOutput(rawTranscript, currentTargetWord);
+
+                if (diagRawWhisper) diagRawWhisper.innerText = `"${rawTranscript}"`;
+                if (diagNormalized) diagNormalized.innerText = `"${normalized}"`;
+                if (diagCandidate) diagCandidate.innerText = candidate || '(none)';
+                if (diagLexicalSim) diagLexicalSim.innerText = lexicalSim.toFixed(2);
+                if (diagPhoneticSim) diagPhoneticSim.innerText = phoneticSim.toFixed(2);
+                if (diagFinalWord) diagFinalWord.innerText = candidate || 'none';
+                if (diagConfidence) diagConfidence.innerText = confidence.toFixed(2);
+
+                const procDuration = Date.now() - startTime;
+                updateDiagEvent(`TRANSCRIPT_RECEIVED: "${candidate}"`);
+
+                if (candidate.length > 0 && !isHallucination) {
+                    currentState = STATE_DELIVERED;
+                    if (diagState) diagState.innerText = 'DELIVERED';
+                    updateDiagEvent('COMPONENT_RESULT_SENT');
+
+                    btn.className = 'mic-btn';
+                    btnIcon.innerText = '🎙️';
+                    btnText.innerText = 'Speak Again';
+                    statusCard.className = 'status-banner status-heard';
+                    statusText.innerHTML = `🗣️ Heard: <span class="heard-highlight">"${candidate}"</span>`;
+
+                    setComponentValue({
+                        attempt_id: attemptId,
+                        transcript: candidate,
+                        raw_transcript: rawTranscript,
+                        confidence: confidence,
+                        error: null,
+                        model_used: "whisper-tiny.en",
+                        processing_time_ms: procDuration,
+                        timestamp: Date.now()
+                    });
+                } else {
+                    updateDiagEvent(isHallucination ? 'HALLUCINATION_FILTERED' : 'WHISPER_EMPTY_TRANSCRIPT');
+                    const notice = isHallucination
+                        ? "⚠️ I couldn't clearly recognize that word. Please try again."
+                        : "⚠️ I didn't hear you clearly. Please try again.";
+                    setUiIdle(notice, false);
+                    setComponentValue({
+                        attempt_id: attemptId,
+                        transcript: "",
+                        raw_transcript: rawTranscript,
+                        confidence: 0.0,
+                        error: "no-speech",
+                        timestamp: Date.now()
+                    });
+                }
+
+            } catch (err) {
+                console.error(`[WHISPER_LOG] ATTEMPT ${attemptId}: transcription error:`, err);
+                setDiagError("Whisper execution error: " + err.message);
+                setUiIdle("⚠️ Audio processing error. Please try speaking again.", true);
+                setComponentValue({
+                    attempt_id: attemptId,
+                    transcript: "",
+                    confidence: 0.0,
+                    error: "api-error",
+                    timestamp: Date.now()
+                });
+            }
+        }
+
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            startPronunciationAttempt();
+        });
+
+        window.addEventListener("load", setFrameHeight);
+        setTimeout(setFrameHeight, 100);
+    </script>
+</body>
+</html>

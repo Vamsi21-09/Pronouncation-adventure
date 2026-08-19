@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Web Speech Optimized Bridge</title>
+    <style>
+        @import url('https://api.fontshare.com/v2/css?f[]=general-sans@600,700,800&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'General Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        body {
+            background: transparent;
+            color: #102A2A;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            width: 100%;
+            padding: 4px 0;
+        }
+
+        .recorder-container {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .mic-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            max-width: 480px;
+            height: 52px;
+            background: #035352;
+            color: #FFFDF5;
+            border: none;
+            border-radius: 14px;
+            font-size: 1.05rem;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 4px 14px rgba(3, 83, 82, 0.3);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            user-select: none;
+            outline: none;
+        }
+
+        .mic-btn:hover:not(:disabled) {
+            background: #023D3C;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(3, 83, 82, 0.4);
+        }
+
+        .mic-btn:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .mic-btn.starting {
+            background: #D97706 !important;
+            color: #FFFDF5 !important;
+            box-shadow: 0 0 16px rgba(217, 119, 6, 0.5) !important;
+            cursor: wait;
+        }
+
+        .mic-btn.listening {
+            background: #EF4444 !important;
+            color: #FFFDF5 !important;
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.6) !important;
+            animation: pulse-red 1.2s infinite ease-in-out;
+        }
+
+        .mic-btn.hearing {
+            background: #10B981 !important;
+            color: #FFFDF5 !important;
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.6) !important;
+            animation: pulse-green 1.2s infinite ease-in-out;
+        }
+
+        .mic-btn.processing {
+            background: #D97706 !important;
+            color: #FFFDF5 !important;
+            box-shadow: 0 0 16px rgba(217, 119, 6, 0.5) !important;
+            animation: pulse-amber 1.2s infinite ease-in-out;
+            cursor: wait;
+        }
+
+        @keyframes pulse-red {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+        }
+
+        @keyframes pulse-green {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+        }
+
+        @keyframes pulse-amber {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.01); }
+        }
+
+        .status-banner {
+            width: 100%;
+            max-width: 480px;
+            border-radius: 12px;
+            padding: 8px 14px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #FAF5DC;
+            border: 1.5px solid rgba(47, 58, 58, 0.2);
+            color: #102A2A;
+            min-height: 40px;
+            transition: all 0.3s ease;
+        }
+
+        .status-starting {
+            border-color: #D97706;
+            background: rgba(217, 119, 6, 0.12);
+            color: #92400E;
+        }
+
+        .status-listening {
+            border-color: #EF4444;
+            background: rgba(239, 68, 68, 0.12);
+            color: #991B1B;
+        }
+
+        .status-hearing {
+            border-color: #10B981;
+            background: rgba(16, 185, 129, 0.15);
+            color: #065F46;
+        }
+
+        .status-processing {
+            border-color: #D97706;
+            background: rgba(217, 119, 6, 0.12);
+            color: #92400E;
+        }
+
+        .status-heard {
+            border-color: #10B981;
+            background: rgba(16, 185, 129, 0.12);
+            color: #065F46;
+        }
+
+        .status-error {
+            border-color: #EF4444;
+            background: rgba(239, 68, 68, 0.15);
+            color: #991B1B;
+            font-size: 0.86rem;
+            line-height: 1.35;
+        }
+
+        .heard-highlight {
+            font-size: 1.05rem;
+            font-weight: 800;
+            color: #035352;
+            letter-spacing: 0.02em;
+        }
+    </style>
+</head>
+<body>
+    <div class="recorder-container">
+        <button id="mic-action-btn" class="mic-btn" type="button">
+            <span id="btn-icon">🎙️</span>
+            <span id="btn-text">Speak Now</span>
+        </button>
+
+        <div id="status-card" class="status-banner">
+            <span id="status-text">🎙️ Ready • Click to speak</span>
+        </div>
+    </div>
+
+    <script>
+        // ---------------------------------------------------------
+        // Streamlit Protocol Bridge
+        // ---------------------------------------------------------
+        function sendToStreamlit(type, data) {
+            window.parent.postMessage({
+                isStreamlitMessage: true,
+                type: type,
+                ...data
+            }, "*");
+        }
+
+        function setComponentValue(value) {
+            console.log(`[EVENT_TRACE] JS_RESULT_SENT:`, value);
+            sendToStreamlit("streamlit:setComponentValue", { value: value });
+        }
+
+        function setFrameHeight() {
+            const height = document.body.scrollHeight || document.documentElement.offsetHeight || 130;
+            sendToStreamlit("streamlit:setFrameHeight", { height: height + 10 });
+        }
+
+        sendToStreamlit("streamlit:componentReady", { apiVersion: 1 });
+
+        // ---------------------------------------------------------
+        // UI & State Variables
+        // ---------------------------------------------------------
+        const btn = document.getElementById('mic-action-btn');
+        const btnIcon = document.getElementById('btn-icon');
+        const btnText = document.getElementById('btn-text');
+        const statusCard = document.getElementById('status-card');
+        const statusText = document.getElementById('status-text');
+
+        const STATE_IDLE = 'IDLE';
+        const STATE_STARTING = 'STARTING';
+        const STATE_LISTENING = 'LISTENING';
+        const STATE_HEARING = 'HEARING';
+        const STATE_PROCESSING = 'PROCESSING';
+        const STATE_DELIVERED = 'DELIVERED';
+
+        let currentState = STATE_IDLE;
+        let currentAttemptId = null;
+        let defaultButtonLabel = "Speak Now";
+        let currentTargetWord = "bat";
+
+        let activeRecognition = null;
+        let resultReceivedForAttempt = false;
+        let initialListeningTimer = null;
+        let autoFlushTimer = null;
+
+        // Constructor detection
+        const hasPhraseApi = typeof window.SpeechRecognitionPhrase !== 'undefined';
+        const hasGrammarApi = typeof (window.SpeechGrammarList || window.webkitSpeechGrammarList) !== 'undefined';
+        const SRClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+        // ---------------------------------------------------------
+        // Streamlit Render Listener
+        // ---------------------------------------------------------
+        window.addEventListener("message", function(event) {
+            if (!event.data || !event.data.isStreamlitMessage) return;
+
+            if (event.data.type === "streamlit:render") {
+                const args = event.data.args || {};
+                if (args.button_label && currentState === STATE_IDLE) {
+                    defaultButtonLabel = args.button_label;
+                    btnText.innerText = defaultButtonLabel;
+                }
+                if (args.target_word) {
+                    currentTargetWord = args.target_word.trim();
+                }
+                setFrameHeight();
+            }
+        });
+
+        function clearAllTimers() {
+            if (initialListeningTimer) {
+                clearTimeout(initialListeningTimer);
+                initialListeningTimer = null;
+            }
+            if (autoFlushTimer) {
+                clearTimeout(autoFlushTimer);
+                autoFlushTimer = null;
+            }
+        }
+
+        function cleanUpRecognition() {
+            clearAllTimers();
+            if (activeRecognition) {
+                try {
+                    activeRecognition.onstart = null;
+                    activeRecognition.onaudiostart = null;
+                    activeRecognition.onsoundstart = null;
+                    activeRecognition.onspeechstart = null;
+                    activeRecognition.onspeechend = null;
+                    activeRecognition.onaudioend = null;
+                    activeRecognition.onresult = null;
+                    activeRecognition.onerror = null;
+                    activeRecognition.onend = null;
+                    activeRecognition.abort();
+                } catch(e) {}
+                activeRecognition = null;
+            }
+        }
+
+        function setUiIdle(message, isError) {
+            clearAllTimers();
+            cleanUpRecognition();
+            currentState = STATE_IDLE;
+
+            btn.className = 'mic-btn';
+            btnIcon.innerText = '🎙️';
+            btnText.innerText = defaultButtonLabel;
+
+            if (isError) {
+                statusCard.className = 'status-banner status-error';
+            } else {
+                statusCard.className = 'status-banner';
+            }
+
+            statusText.innerHTML = message || '🎙️ Ready • Click to speak';
+            setFrameHeight();
+        }
+
+        function generateAttemptId() {
+            if (window.crypto && window.crypto.randomUUID) {
+                return window.crypto.randomUUID();
+            }
+            return 'att_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+        }
+
+        // ---------------------------------------------------------
+        // Alternative Candidate Selection (Single-Word Mode)
+        // ---------------------------------------------------------
+        function selectBestCandidate(alternatives, targetWord) {
+            const cleanTarget = (targetWord || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+            const isSingleWord = (targetWord || "").trim().split(/\s+/).filter(w => w.length > 0).length <= 1;
+
+            if (!alternatives || alternatives.length === 0) return "";
+
+            if (!isSingleWord) {
+                return (alternatives[0].transcript || "").trim().toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()?"']/g, "").replace(/\s+/g, " ").trim();
+            }
+
+            // In Single Word Mode:
+            // 1. Check all alternatives for exact match
+            for (let i = 0; i < alternatives.length; i++) {
+                const rawAlt = (alternatives[i].transcript || "").trim().toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()?"']/g, "").trim();
+                const altTokens = rawAlt.split(/\s+/).filter(w => w.length > 0);
+                if (rawAlt === cleanTarget) {
+                    return cleanTarget;
+                }
+                if (altTokens.length === 2 && ["a", "an", "the"].includes(altTokens[0]) && altTokens[1] === cleanTarget) {
+                    return cleanTarget;
+                }
+            }
+
+            // 2. Otherwise return the primary recognized word without forcing to target
+            const primaryRaw = (alternatives[0].transcript || "").trim().toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()?"']/g, "").trim();
+            const primaryTokens = primaryRaw.split(/\s+/).filter(w => w.length > 0);
+
+            if (primaryTokens.length === 1) {
+                return primaryTokens[0];
+            }
+            if (primaryTokens.length === 2 && ["a", "an", "the"].includes(primaryTokens[0])) {
+                return primaryTokens[1];
+            }
+            return primaryRaw;
+        }
+
+        // ---------------------------------------------------------
+        // Web Speech Recognition Lifecycle
+        // ---------------------------------------------------------
+        function startWebSpeechAttempt() {
+            if (currentState === STATE_STARTING || currentState === STATE_LISTENING || currentState === STATE_HEARING || currentState === STATE_PROCESSING) {
+                console.log(`[WEB_SPEECH_LOG] Click ignored during active state: ${currentState}`);
+                return;
+            }
+
+            if (!SRClass) {
+                console.error('[WEB_SPEECH_LOG] SpeechRecognition API not supported.');
+                setUiIdle("⚠️ Web Speech not supported in this browser. Please use Chrome or Edge.", true);
+                setComponentValue({
+                    attempt_id: generateAttemptId(),
+                    transcript: "",
+                    confidence: 0.0,
+                    error: "unsupported",
+                    timestamp: Date.now()
+                });
+                return;
+            }
+
+            cleanUpRecognition();
+
+            const attemptId = generateAttemptId();
+            currentAttemptId = attemptId;
+            resultReceivedForAttempt = false;
+            currentState = STATE_STARTING;
+
+            const cleanTarget = currentTargetWord.trim().toLowerCase();
+            const isSingleWord = cleanTarget.split(/\s+/).filter(w => w.length > 0).length <= 1;
+
+            console.log(`[EVENT_TRACE] MIC_CLICKED (Attempt ${attemptId}, Target: '${cleanTarget}', Mode: ${isSingleWord ? 'SINGLE_WORD' : 'SENTENCE'})`);
+
+            btn.className = 'mic-btn starting';
+            btnIcon.innerText = '⏳';
+            btnText.innerText = 'Starting microphone...';
+            statusCard.className = 'status-banner status-starting';
+            statusText.innerHTML = '⏳ Starting microphone...';
+            setFrameHeight();
+
+            try {
+                const recognition = new SRClass();
+                activeRecognition = recognition;
+
+                recognition.lang = 'en-US';
+                recognition.continuous = false;
+                recognition.interimResults = true;
+                recognition.maxAlternatives = 3;
+
+                // 1. Contextual Phrase Biasing (Chrome 124+)
+                if (hasPhraseApi && isSingleWord) {
+                    try {
+                        const phrases = [
+                            new SpeechRecognitionPhrase(cleanTarget, 8.0),
+                            new SpeechRecognitionPhrase("the " + cleanTarget, 5.0),
+                            new SpeechRecognitionPhrase("a " + cleanTarget, 4.0)
+                        ];
+                        recognition.phrases = phrases;
+                        console.log(`[EVENT_TRACE] Contextual SpeechRecognitionPhrase applied for '${cleanTarget}'`);
+                    } catch(e) {}
+                } else if (hasGrammarApi && isSingleWord) {
+                    try {
+                        const SGList = window.SpeechGrammarList || window.webkitSpeechGrammarList;
+                        const grammars = new SGList();
+                        const jsgf = `#JSGF V1.0; grammar targets; public <target> = ${cleanTarget} | the ${cleanTarget} | a ${cleanTarget} ;`;
+                        grammars.addFromString(jsgf, 1.0);
+                        recognition.grammars = grammars;
+                    } catch(e) {}
+                }
+
+                recognition.onstart = function() {
+                    if (attemptId !== currentAttemptId) return;
+                    currentState = STATE_LISTENING;
+                    console.log(`[EVENT_TRACE] ONSTART -> STATE_LISTENING`);
+
+                    btn.className = 'mic-btn listening';
+                    btnIcon.innerText = '🔴';
+                    btnText.innerText = 'Listening — Speak now...';
+                    statusCard.className = 'status-banner status-listening';
+                    statusText.innerHTML = '🔴 Listening... (speak clearly)';
+                    setFrameHeight();
+                };
+
+                recognition.onaudiostart = function() {
+                    if (attemptId !== currentAttemptId) return;
+                    console.log(`[EVENT_TRACE] ONAUDIOSTART`);
+                };
+
+                recognition.onsoundstart = function() {
+                    if (attemptId !== currentAttemptId) return;
+                    console.log(`[EVENT_TRACE] ONSOUNDSTART`);
+                };
+
+                recognition.onspeechstart = function() {
+                    if (attemptId !== currentAttemptId) return;
+                    currentState = STATE_HEARING;
+                    console.log(`[EVENT_TRACE] ONSPEECHSTART -> STATE_HEARING`);
+
+                    btn.className = 'mic-btn hearing';
+                    btnIcon.innerText = '🎤';
+                    btnText.innerText = 'Hearing you...';
+                    statusCard.className = 'status-banner status-hearing';
+                    statusText.innerHTML = '🎤 Hearing you... keep speaking!';
+                    setFrameHeight();
+                };
+
+                recognition.onspeechend = function() {
+                    if (attemptId !== currentAttemptId) return;
+                    console.log(`[EVENT_TRACE] ONSPEECHEND`);
+                };
+
+                recognition.onaudioend = function() {
+                    if (attemptId !== currentAttemptId) return;
+                    console.log(`[EVENT_TRACE] ONAUDIOEND`);
+                };
+
+                recognition.onresult = function(event) {
+                    if (attemptId !== currentAttemptId) return;
+
+                    let interimText = "";
+                    let finalAlternatives = [];
+                    let hasFinal = false;
+
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        const res = event.results[i];
+                        if (res.isFinal) {
+                            hasFinal = true;
+                            for (let a = 0; a < res.length; a++) {
+                                finalAlternatives.push({
+                                    transcript: res[a].transcript,
+                                    confidence: res[a].confidence
+                                });
+                            }
+                        } else {
+                            interimText += res[0].transcript;
+                        }
+                    }
+
+                    // Display interim visual feedback
+                    if (!hasFinal && interimText) {
+                        statusText.innerHTML = `🗣️ Hearing: <span class="heard-highlight">"${interimText.trim()}"</span>`;
+                    }
+
+                    // Handle Final Result
+                    if (hasFinal && finalAlternatives.length > 0 && !resultReceivedForAttempt) {
+                        resultReceivedForAttempt = true;
+                        clearAllTimers();
+                        currentState = STATE_PROCESSING;
+
+                        console.log(`[EVENT_TRACE] ONRESULT (FINAL count: ${finalAlternatives.length})`);
+                        console.log(`[EVENT_TRACE] RESULT_RECEIVED`);
+
+                        btn.className = 'mic-btn processing';
+                        btnIcon.innerText = '⏳';
+                        btnText.innerText = 'Analysing pronunciation...';
+                        statusCard.className = 'status-banner status-processing';
+                        statusText.innerHTML = '⏳ Analysing pronunciation...';
+
+                        const selectedCandidate = selectBestCandidate(finalAlternatives, currentTargetWord);
+                        const topConfidence = (finalAlternatives[0].confidence > 0) ? finalAlternatives[0].confidence : 1.0;
+
+                        console.log(`[EVENT_TRACE] CANDIDATE_SELECTED: '${selectedCandidate}'`);
+                        console.log(`[EVENT_TRACE] COMPONENT_RESULT_SENT`);
+
+                        // Stop recognition once final result arrives
+                        try { recognition.stop(); } catch(e) {}
+
+                        currentState = STATE_DELIVERED;
+                        btn.className = 'mic-btn';
+                        btnIcon.innerText = '🎙️';
+                        btnText.innerText = 'Speak Again';
+                        statusCard.className = 'status-banner status-heard';
+                        statusText.innerHTML = `🗣️ Heard: <span class="heard-highlight">"${selectedCandidate}"</span>`;
+
+                        setComponentValue({
+                            attempt_id: attemptId,
+                            transcript: selectedCandidate,
+                            alternatives: finalAlternatives.map(a => a.transcript),
+                            confidence: topConfidence,
+                            error: null,
+                            timestamp: Date.now()
+                        });
+                    }
+                };
+
+                recognition.onerror = function(event) {
+                    if (attemptId !== currentAttemptId) return;
+
+                    const errName = event.error || "unknown";
+                    console.error(`[EVENT_TRACE] ONERROR: ${errName}`);
+
+                    if (resultReceivedForAttempt) return;
+
+                    clearAllTimers();
+                    let userMessage = "⚠️ I didn't hear you. Please try again.";
+                    let isPermError = false;
+
+                    if (errName === "not-allowed" || errName === "service-not-allowed") {
+                        userMessage = "🔒 Mic blocked. Allow microphone access in your browser.";
+                        isPermError = true;
+                    } else if (errName === "no-speech") {
+                        userMessage = "⚠️ I didn't hear you. Click 'Speak Now' and speak clearly.";
+                    } else if (errName === "network") {
+                        userMessage = "⚠️ Speech network issue. Please try again.";
+                    } else if (errName === "audio-capture") {
+                        userMessage = "⚠️ Microphone unavailable. Check audio settings.";
+                    }
+
+                    setUiIdle(userMessage, isPermError);
+                    setComponentValue({
+                        attempt_id: attemptId,
+                        transcript: "",
+                        confidence: 0.0,
+                        error: errName,
+                        timestamp: Date.now()
+                    });
+                };
+
+                recognition.onend = function() {
+                    if (attemptId !== currentAttemptId) return;
+                    clearAllTimers();
+                    console.log(`[EVENT_TRACE] ONEND (resultReceived = ${resultReceivedForAttempt})`);
+
+                    if (resultReceivedForAttempt) {
+                        return;
+                    }
+
+                    setUiIdle("⚠️ I didn't hear you speak. Click 'Speak Now' to try again.", false);
+                    setComponentValue({
+                        attempt_id: attemptId,
+                        transcript: "",
+                        confidence: 0.0,
+                        error: "no-speech",
+                        timestamp: Date.now()
+                    });
+                };
+
+                recognition.start();
+                console.log(`[EVENT_TRACE] START_CALLED`);
+
+            } catch (err) {
+                console.error(`[EVENT_TRACE] Failed to start recognition:`, err);
+                setUiIdle("⚠️ Could not start microphone. Click to retry.", true);
+                setComponentValue({
+                    attempt_id: attemptId,
+                    transcript: "",
+                    confidence: 0.0,
+                    error: "start-failed",
+                    timestamp: Date.now()
+                });
+            }
+        }
+
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            startWebSpeechAttempt();
+        });
+
+        window.addEventListener("load", setFrameHeight);
+        setTimeout(setFrameHeight, 100);
+    </script>
+</body>
+</html>

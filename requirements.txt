@@ -1,0 +1,12 @@
+# Pronunciation Adventure - Core Dependencies (Python 3.11/3.12 compatible)
+streamlit>=1.40.0,<1.44.0
+supabase>=2.10.0,<3.0.0
+pydantic>=2.10.0,<3.0.0
+python-dotenv>=1.0.1,<2.0.0
+pytest>=8.3.0,<9.0.0
+rapidfuzz>=3.10.0,<4.0.0
+SpeechRecognition>=3.10.0,<4.0.0
+audio-recorder-streamlit>=0.0.10
+pandas>=2.2.0,<3.0.0
+pyarrow>=15.0.0,<20.0.0
+Pillow>=10.0.0,<12.0.0

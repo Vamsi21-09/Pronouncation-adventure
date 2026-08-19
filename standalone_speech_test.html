@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Standalone Web Speech API Diagnostic Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+            background: #0f172a;
+            color: #f8fafc;
+            padding: 24px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 { color: #38bdf8; font-size: 1.5rem; margin-bottom: 8px; }
+        p { color: #94a3b8; font-size: 0.9rem; margin-bottom: 16px; }
+        .btn {
+            background: #0284c7;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 1rem;
+            font-weight: 700;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-right: 12px;
+            margin-bottom: 16px;
+        }
+        .btn:hover { background: #0369a1; }
+        .btn.listening { background: #ef4444; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+        .card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        .card h2 { font-size: 1.1rem; color: #cbd5e1; margin-top: 0; margin-bottom: 12px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.85rem; }
+        .label { color: #64748b; }
+        .value { color: #f1f5f9; font-weight: 600; }
+        .log-box {
+            background: #020617;
+            border: 1px solid #1e293b;
+            border-radius: 6px;
+            padding: 12px;
+            font-family: monospace;
+            font-size: 0.8rem;
+            max-height: 250px;
+            overflow-y: auto;
+            color: #10b981;
+            line-height: 1.4;
+        }
+        .log-item { margin-bottom: 4px; }
+        .log-err { color: #f87171; }
+        .log-warn { color: #fbbf24; }
+        .log-info { color: #38bdf8; }
+        .transcript-highlight {
+            font-size: 1.3rem;
+            color: #4ade80;
+            font-weight: 800;
+            margin-top: 8px;
+        }
+        .input-box {
+            background: #0f172a;
+            border: 1px solid #475569;
+            color: #f8fafc;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: 700;
+            width: 140px;
+            margin-right: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Standalone Web Speech API Diagnostic (Phrase-Biased & Interim)</h1>
+    <p>Target-aware Web Speech test with continuous buffer, interim results, and phrase biasing.</p>
+
+    <div style="margin-bottom:16px; display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+        <label style="color:#cbd5e1; font-size:0.9rem; font-weight:600;">Target Word:</label>
+        <input type="text" id="target-input" class="input-box" value="bat" />
+
+        <button id="test-btn" class="btn" onclick="startTest()">🎙️ Speak Target Word</button>
+        <button class="btn" style="background:#475569;" onclick="clearLog()">Clear Log</button>
+    </div>
+
+    <div class="card">
+        <h2>Environment & Features</h2>
+        <div class="grid">
+            <div><span class="label">SpeechRecognitionPhrase:</span> <span class="value" id="has-phrase-api">-</span></div>
+            <div><span class="label">SpeechGrammarList:</span> <span class="value" id="has-grammar-api">-</span></div>
+            <div><span class="label">processLocally in SR:</span> <span class="value" id="has-local-sr">-</span></div>
+            <div><span class="label">Active Constructor:</span> <span class="value" id="active-ctor">-</span></div>
+            <div style="grid-column: span 2;"><span class="label">User Agent:</span> <span class="value" id="user-agent" style="font-size:0.75rem; word-break:break-all;">-</span></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Latest Attempt State</h2>
+        <div class="grid">
+            <div><span class="label">State:</span> <span class="value" id="state-val">IDLE</span></div>
+            <div><span class="label">Last Event:</span> <span class="value" id="last-event-val">NONE</span></div>
+            <div><span class="label">onstart:</span> <span class="value" id="onstart-val">NO</span></div>
+            <div><span class="label">onspeechstart:</span> <span class="value" id="onspeechstart-val">NO</span></div>
+            <div><span class="label">interim hypothesis:</span> <span class="value" id="interim-val">(none)</span></div>
+            <div><span class="label">final hypothesis:</span> <span class="value" id="final-val">(none)</span></div>
+            <div><span class="label">onerror:</span> <span class="value" id="onerror-val">NONE</span></div>
+            <div><span class="label">onend:</span> <span class="value" id="onend-val">NO</span></div>
+        </div>
+        <div style="margin-top:12px;">
+            <span class="label">Final Recognized Candidate:</span>
+            <div id="transcript-val" class="transcript-highlight">(none)</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Real-Time Event Sequence Log</h2>
+        <div id="event-log" class="log-box"></div>
+    </div>
+
+    <script>
+        const logBox = document.getElementById('event-log');
+        const testBtn = document.getElementById('test-btn');
+        const targetInput = document.getElementById('target-input');
+        let recognition = null;
+        let isListening = false;
+        let resultReceived = false;
+        let autoStopTimer = null;
+
+        function log(msg, type = "info") {
+            const time = new Date().toISOString().substring(11, 19);
+            const div = document.createElement('div');
+            div.className = `log-item log-${type}`;
+            div.innerText = `[${time}] ${msg}`;
+            logBox.appendChild(div);
+            logBox.scrollTop = logBox.scrollHeight;
+            console.log(`[STANDALONE] ${msg}`);
+        }
+
+        function clearLog() {
+            logBox.innerHTML = '';
+        }
+
+        // Feature detection
+        const hasPhrase = typeof window.SpeechRecognitionPhrase !== 'undefined';
+        const hasGrammar = typeof (window.SpeechGrammarList || window.webkitSpeechGrammarList) !== 'undefined';
+        const SRClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let hasProcessLocally = false;
+
+        if (SRClass) {
+            try {
+                const tempSR = new SRClass();
+                hasProcessLocally = ('processLocally' in tempSR);
+            } catch(e) {}
+        }
+
+        document.getElementById('has-phrase-api').innerText = hasPhrase ? 'YES (Supported)' : 'NO (Not Exposed)';
+        document.getElementById('has-grammar-api').innerText = hasGrammar ? 'YES (Supported)' : 'NO (Not Exposed)';
+        document.getElementById('has-local-sr').innerText = hasProcessLocally ? 'YES (Supported)' : 'NO (Cloud Only)';
+        document.getElementById('user-agent').innerText = navigator.userAgent;
+
+        if (SRClass) {
+            document.getElementById('active-ctor').innerText = (window.SpeechRecognition ? 'window.SpeechRecognition' : 'window.webkitSpeechRecognition');
+            log(`Found SpeechRecognition constructor: ${document.getElementById('active-ctor').innerText}`, 'info');
+        } else {
+            document.getElementById('active-ctor').innerText = 'NONE (Not Supported)';
+            log('ERROR: No SpeechRecognition constructor found!', 'err');
+        }
+
+        function startTest() {
+            if (isListening && recognition) {
+                log('Manual stop requested...', 'warn');
+                try { recognition.stop(); } catch(e) {}
+                return;
+            }
+
+            if (!SRClass) {
+                alert('SpeechRecognition is not supported.');
+                return;
+            }
+
+            const targetWord = (targetInput.value || "bat").trim().toLowerCase();
+            resultReceived = false;
+            if (autoStopTimer) clearTimeout(autoStopTimer);
+
+            // Reset UI
+            document.getElementById('state-val').innerText = 'STARTING';
+            document.getElementById('last-event-val').innerText = 'startTest() called';
+            document.getElementById('onstart-val').innerText = 'NO';
+            document.getElementById('onspeechstart-val').innerText = 'NO';
+            document.getElementById('interim-val').innerText = '(none)';
+            document.getElementById('final-val').innerText = '(none)';
+            document.getElementById('onerror-val').innerText = 'NONE';
+            document.getElementById('onend-val').innerText = 'NO';
+            document.getElementById('transcript-val').innerText = '(none)';
+
+            log('----------------------------------------------------', 'info');
+            log(`STARTING TEST: Target='${targetWord}'`, 'info');
+
+            try {
+                recognition = new SRClass();
+                recognition.lang = 'en-US';
+                recognition.continuous = true;       // Continuous gives buffer window for short utterances
+                recognition.interimResults = true;   // Immediate interim hypothesis streaming
+                recognition.maxAlternatives = 3;
+
+                // 1. Apply SpeechRecognitionPhrase contextual biasing if supported
+                if (hasPhrase) {
+                    try {
+                        const phraseList = [
+                            new SpeechRecognitionPhrase(targetWord, 8.0),
+                            new SpeechRecognitionPhrase("the " + targetWord, 5.0),
+                            new SpeechRecognitionPhrase("a " + targetWord, 4.0)
+                        ];
+                        recognition.phrases = phraseList;
+                        log(`Configured SpeechRecognitionPhrase biasing for '${targetWord}' (boost: 8.0)`, 'info');
+                    } catch(err) {
+                        log(`SpeechRecognitionPhrase notice: ${err.message}`, 'warn');
+                    }
+                } else if (hasGrammar) {
+                    try {
+                        const SGList = window.SpeechGrammarList || window.webkitSpeechGrammarList;
+                        const grammars = new SGList();
+                        const jsgf = `#JSGF V1.0; grammar targets; public <target> = ${targetWord} | the ${targetWord} | a ${targetWord} ;`;
+                        grammars.addFromString(jsgf, 1.0);
+                        recognition.grammars = grammars;
+                        log(`Configured SpeechGrammarList JSGF for '${targetWord}'`, 'info');
+                    } catch(err) {
+                        log(`SpeechGrammarList notice: ${err.message}`, 'warn');
+                    }
+                }
+
+                recognition.onstart = function() {
+                    log('EVENT: onstart -> Recognition started', 'info');
+                    document.getElementById('onstart-val').innerText = 'YES';
+                    document.getElementById('state-val').innerText = 'LISTENING';
+                    document.getElementById('last-event-val').innerText = 'onstart';
+                    isListening = true;
+                    testBtn.className = 'btn listening';
+                    testBtn.innerText = `🔴 Listening... (Say "${targetWord}")`;
+                };
+
+                recognition.onaudiostart = function() {
+                    log('EVENT: onaudiostart', 'info');
+                };
+
+                recognition.onsoundstart = function() {
+                    log('EVENT: onsoundstart', 'info');
+                };
+
+                recognition.onspeechstart = function() {
+                    log('EVENT: onspeechstart -> Speech detected', 'info');
+                    document.getElementById('onspeechstart-val').innerText = 'YES';
+                    document.getElementById('state-val').innerText = 'HEARING';
+                    document.getElementById('last-event-val').innerText = 'onspeechstart';
+
+                    // Safety watchdog: after speech begins, stop recognition after 3.5s to finalize buffer if continuous is active
+                    autoStopTimer = setTimeout(function() {
+                        if (isListening && recognition && !resultReceived) {
+                            log('Auto-stopping continuous stream to force hypothesis finalization...', 'warn');
+                            try { recognition.stop(); } catch(e) {}
+                        }
+                    }, 3500);
+                };
+
+                recognition.onresult = function(event) {
+                    let interimText = '';
+                    let finalText = '';
+
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        const res = event.results[i];
+                        if (res.isFinal) {
+                            finalText += res[0].transcript;
+                            log(`EVENT: onresult [FINAL] -> "${res[0].transcript}" (confidence: ${res[0].confidence})`, 'info');
+                            if (res.length > 1) {
+                                for (let a = 1; a < res.length; a++) {
+                                    log(`  Alternative [${a}]: "${res[a].transcript}" (confidence: ${res[a].confidence})`, 'info');
+                                }
+                            }
+                        } else {
+                            interimText += res[0].transcript;
+                            log(`EVENT: onresult [INTERIM] -> "${res[0].transcript}"`, 'info');
+                        }
+                    }
+
+                    if (interimText) {
+                        document.getElementById('interim-val').innerText = `"${interimText.trim()}"`;
+                    }
+
+                    if (finalText) {
+                        resultReceived = true;
+                        document.getElementById('final-val').innerText = `"${finalText.trim()}"`;
+                        document.getElementById('transcript-val').innerText = `"${finalText.trim()}"`;
+                        document.getElementById('state-val').innerText = 'FINAL_RESULT_RECEIVED';
+                        document.getElementById('last-event-val').innerText = 'onresult (FINAL)';
+
+                        // Stop recognition once final result arrives
+                        try { recognition.stop(); } catch(e) {}
+                    }
+                };
+
+                recognition.onerror = function(event) {
+                    const err = event.error || 'unknown';
+                    log(`EVENT: onerror -> ${err}`, 'err');
+                    document.getElementById('onerror-val').innerText = err;
+                    document.getElementById('state-val').innerText = `ERROR: ${err}`;
+                };
+
+                recognition.onend = function() {
+                    log('EVENT: onend -> Session closed', 'warn');
+                    document.getElementById('onend-val').innerText = 'YES';
+                    document.getElementById('last-event-val').innerText = 'onend';
+                    isListening = false;
+                    testBtn.className = 'btn';
+                    testBtn.innerText = '🎙️ Speak Target Word';
+                    if (autoStopTimer) clearTimeout(autoStopTimer);
+
+                    if (resultReceived) {
+                        document.getElementById('state-val').innerText = 'SUCCESS';
+                        log('SUMMARY: Recognized successfully with phrase biasing!', 'info');
+                    } else {
+                        document.getElementById('state-val').innerText = 'ENDED_WITHOUT_RESULT';
+                        log('SUMMARY: onend closed without final result', 'warn');
+                    }
+                };
+
+                recognition.start();
+                log('recognition.start() called', 'info');
+
+            } catch (err) {
+                log(`EXCEPTION: ${err.message}`, 'err');
+            }
+        }
+    </script>
+</body>
+</html>
